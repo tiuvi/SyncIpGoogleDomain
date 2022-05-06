@@ -1,17 +1,17 @@
 package ip
 
-import(
-	"time"
+import (
+	"io"
 	"net"
 	"net/http"
-	"io"
-	."tiuvi/core/dac"
 	"strconv"
 	"strings"
+	"time"
+	. "tiuvi/core/dac"
 )
 
 //SpaceFile Permanente
-var ipFile *PublicSpaceFile
+var IpFile *PublicSpaceFile
 var file , folder = "ip" , "ipErrors"
 
 //Errores
@@ -29,12 +29,12 @@ func NewDacForIp(path string ){
 func InitUpdateIp(user string, pass string , dominio string){
 	
 	//Crea un espacio permanente con un campo ip de 16 bytes en dac/ip/ip.dacbyte
-	ipFile = NewSfPermBytes(map[string]int64{"ip":16} , nil , "ip", "ip")
+	IpFile = NewSfPermBytes(map[string]int64{"ip":16} , nil , "ip", "ip")
 
 	//Revisamos nuestra ip haciendo una busqueda inversa dns.
 	iprecords, err := net.LookupIP(dominio)
 	if goError  &&
-	ipFile.NRESM(goError , err.Error(),file , folder){}
+	IpFile.NRESM(goError , err.Error(),file , folder){}
 
 	//Recorremos las ip y nos quedamos con la ip4
 	for _, ip := range iprecords {
@@ -43,65 +43,86 @@ func InitUpdateIp(user string, pass string , dominio string){
 
 			ipAfter := ip.String()
 			//Escribe esta ip en el campo
-			ipFile.SetOneFieldString("ip",ipAfter)
+			IpFile.SetOneFieldString("ip",ipAfter)
 	
 		}
 	}
-	
+
+	 go UpdateIp(user , pass, dominio)
+
+}
+
+func UpdateIp(user string, pass string , dominio string){
+
+	var ipAfter string
+	var url string = "https://domains.google.com/checkip"
+	var respIp *http.Response
+	var respUpdIp *http.Response
 	//Ejecutamos este bucle cada 20 seugndos
 	tikect := time.Tick(20 * time.Second)
 	for range tikect {
 
 		//Lee la ip en el campo
-		ipAfter := ipFile.GetOneFieldString("ip")
+		ipAfter = IpFile.GetOneFieldString("ip")
 	
-		//Revisa tu ip en google
-		url := "https://domains.google.com/checkip"
-		//Falla mucho aunque digan que no.
-		//url := "https://api.ipify.org"
 
-		resp, err := http.Get(url)
+		respIp, err = http.Get(url)
 		if goError  &&
-		ipFile.NRESM(goError , err.Error(),file , folder) ||
-		ipFile.NRESM(resp.StatusCode > 299 ,"Response failed with status code:" + strconv.Itoa(resp.StatusCode) ,file , folder){
+		IpFile.NRESM(goError , err.Error() ,file , folder) ||
+		IpFile.NRESM(respIp.StatusCode > 299 ,"Response failed with status code:" + strconv.Itoa(respIp.StatusCode) ,file , folder){
+			
 			continue
 		}
-		defer resp.Body.Close()
+			
 
 
 
-		body, err := io.ReadAll(resp.Body)
+		body, err := io.ReadAll(respIp.Body)
 		ipNow := string(body)
 		if goError  &&
-		ipFile.NRESM(goError , err.Error(),file , folder) ||
-		ipFile.NRESM(!checkIPAddress(ipNow) ,"Respuesta erronea, no es una ip valida." ,file , folder){
+		IpFile.NRESM(goError , err.Error(),file , folder) ||
+		IpFile.NRESM(!checkIPAddress(ipNow) ,"Respuesta erronea, no es una ip valida." ,file , folder){
 			continue
 		}
 	
-		
+		err = respIp.Body.Close()
+		if goError  &&
+		IpFile.NRESM(goError , err.Error(),file , folder){
+			continue
+		}
 	
+	
+		
 		if ipNow != ipAfter {
 
 			url := strings.Join([]string{ "https://", user , ":" , pass , 
 			"@domains.google.com/nic/update?hostname=" , dominio , "&myip=" , ipNow } ,"")
 
-			resp, err := http.Get(url)
+			respUpdIp, err = http.Get(url)	 
 			if goError  &&
-			ipFile.NRESM(goError , err.Error(),file , folder) || 
-			ipFile.NRESM(resp.StatusCode > 299 ,"Response failed with status code:" + strconv.Itoa(resp.StatusCode) ,file , folder){
+			IpFile.NRESM(goError , err.Error() ,file , folder) || 
+			IpFile.NRESM(respUpdIp.StatusCode > 299 ,"Response failed with status code:" + strconv.Itoa(respUpdIp.StatusCode) ,file , folder){
+				
 				continue
 			}
 	
-			body, err := io.ReadAll(resp.Body)
+			body, err := io.ReadAll(respUpdIp.Body)
 			if goError  &&
-			ipFile.NRESM(goError , err.Error(),file , folder){
+			IpFile.NRESM(goError , err.Error(),file , folder){
 				continue
 			}
-			defer resp.Body.Close()
+			
+			err = respUpdIp.Body.Close()
+			if goError  &&
+			IpFile.NRESM(goError , err.Error(),file , folder){
+				continue
+			}
 
-			ipFile.SetOneFieldString("ip",ipNow)
 
-			ipFile.NRESM(true ,"IpUpdate: " + string(body),file , folder)
+			IpFile.SetOneFieldString("ip",ipNow)
+
+			IpFile.NRESM(true ,"IpUpdate: " + string(body),file , folder)
+
 		}
 	}
 }
